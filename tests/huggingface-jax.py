@@ -29,7 +29,7 @@ import tensorflow as tf
 import tf2onnx
 from jax.experimental import jax2tf
 
-compare_perf = False
+compare_perf = True
 time_to_run = 10
 time_step = 10
 
@@ -66,6 +66,22 @@ class TestTransformers(unittest.TestCase):
             time_end = time.time()
             val = (time_end - time_start) / n
             print(f'= avg ort name={self.name}, time={val}, n={n}')
+        return results
+
+    def run_tf(self, func, input_dict):
+        inputs = [tf.convert_to_tensor(v, name=k) for k, v in input_dict.items()]
+        results = func(*inputs)
+        if compare_perf:
+            n = 0
+            time_start = time.time()
+            time_stop = time_start + time_to_run
+            while time.time() < time_stop:
+                for _ in range(time_step):
+                    _ = func(*inputs)
+                n += time_step
+            time_end = time.time()
+            val = (time_end - time_start) / n
+            print(f'= avg tf name={self.name}, time={val}, n={n}')
         return results
 
     def run_jax(self, model, inputs):
@@ -106,13 +122,14 @@ class TestTransformers(unittest.TestCase):
         # input tensors to numpy
         input_dict = {k: np.asarray(v) for k, v in onnx_inputs.items()}
 
+        func = tf.function(jax2tf.convert(model, enable_xla=False), autograph=False, input_signature=spec)
+        _ = self.run_tf(func, input_dict)
+
         model_path = os.path.join(dst, self.name)
         if not large:
             model_path = model_path + ".onnx"
         print("= convert")
         time_start = time.time()
-        func = tf.function(jax2tf.convert(model, enable_xla=False),
-                           autograph=False, input_signature=spec)
         model = None
         _, _ = tf2onnx.convert.from_function(
             func, input_signature=spec, opset=13, large_model=large, output_path=model_path)
@@ -173,7 +190,7 @@ class TestTransformers(unittest.TestCase):
         outputs = ["last_hidden_state"]
         self.run_test(model, inputs, outputs=outputs, large=True, rtol=1e-5)
 
-    @unittest.skip("crashes in grapper, see #1601 for stack trace")
+    @unittest.skip("crashes in grappler, see #1601 for stack trace")
     def test_JaxBartModel(self):
         self._test_JaxBartModel('facebook/bart-base')
 
